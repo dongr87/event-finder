@@ -4,23 +4,25 @@ from datetime import datetime, date
 from model import Event
 from typing import Optional
 
-
-def fetch_crystal_events():
+class BaseScraper:
+    "Base class, to store general headers or methods"
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     }
-    # Added headers and follow_redirects to avoid 403 and handle URL changes
-    url = 'https://www.crystalballroomboston.com/events/'
-    print(f"fetching content from {url}...")
 
-    try:
-        response = httpx.get(url, headers=headers, follow_redirects=True)
+class CrystalScraper(BaseScraper):
+    url = "https://www.crystalballroomboston.com/events/"
+
+    def fetch(self) -> list[Event]:
+        parsed_events = []
+        print(f"fetching content from {self.url}...")
+        response = httpx.get(self.url, headers=self.headers, follow_redirects=True)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
         events = soup.select('div#event-listings .event-grid-item')
-        print(f"Found {len(events)} events")
-        for event in events[:1]:
+
+        for event in events:
             # 1. get event title
             title_el = event.select_one('.entry-title')
             title = title_el.a.text.strip() if title_el else "Unknown Title"
@@ -35,46 +37,41 @@ def fetch_crystal_events():
             # parsing clean date
             clean_date = datetime.strptime(date_str, "%a, %b %d, %Y")
             
-            raw_data = {
-                "venue": "Crystal Ballroom",
-                "title": title,
-                "link": link,
-                "start_time": clean_date,
-                "raw_date_str": date_str
-            }
+            event = Event(
+                venue="Crystal Ballroom",
+                title=title,
+                link=link,
+                start_time=clean_date,
+                raw_date_str=date_str
+            )
+            parsed_events.append(event)
 
-            event_obj = Event(**raw_data)
-    except httpx.HTTPError as e:
-        print(f"fetching error: {e}")
-    
+        return parsed_events
 
-def parse_rockwell_date(date_str: str):
-    try:
+
+class RockwellScraper(BaseScraper):
+    url = "https://therockwell.org/calendar/month"
+
+    def _parse_date(self, date_str: str):
+        """
+        Example format: Thu, February 5 @ 7:00 pm
+        """
         clean_str = date_str.replace('@', '').replace('  ', ' ')
         clean_str_with_year = f"{clean_str}, 2026"
         dt = datetime.strptime(clean_str_with_year, "%a, %B %d %I:%M %p, %Y")
         return dt
-    except Exception as e:
-        print(f"error parsing date: {e}")
-        return None
 
+    def fetch(self) -> list[Event]:
+        parsed_events = []
+        print(f"fetching content from {self.url}...")
 
-def fetch_rockwell_events():
-    url = "https://therockwell.org/calendar/month"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    }
-    print(f"fetching content from {url}...")
-
-    try:
-        response = httpx.get(url, headers=headers, follow_redirects=True)
+        response = httpx.get(self.url, headers=self.headers, follow_redirects=True)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
         events = soup.select('td.tribe-events-calendar-month__day')
-        print(f"found {len(events)} events")
 
-        for event in events[:]:
+        for event in events:
             articles = event.select('article.tribe-events-calendar-month__calendar-event')
 
             for article in articles:
@@ -85,22 +82,13 @@ def fetch_rockwell_events():
                 full_date_el = article.select_one('.tribe-event-date-start')
                 full_date_str = full_date_el.text.strip() if full_date_el else ""
 
-                raw_data = {
-                    "venue": "Rockwell",
-                    "title": title,
-                    "link": link,
-                    "start_time": parse_rockwell_date(full_date_str),
-                    "raw_date_str": full_date_str
-                }
+                event = Event(
+                    venue="Rockwell",
+                    title=title,
+                    link=link,
+                    start_time=self._parse_date(full_date_str),
+                    raw_date_str=full_date_str
+                )
+                parsed_events.append(event)
 
-                event_obj = Event(**raw_data)
-
-                print(event_obj)
-
-    except httpx.HTTPError as e:
-        print(f"fetching error: {e}")
-
-
-if __name__ == "__main__":
-    # fetch_crystal_events()
-    fetch_rockwell_events()
+        return parsed_events
